@@ -1,0 +1,6 @@
+{
+  "name": "rust-drive-tests",
+  "private": true,
+  "scripts": {"test:frontend": "node tests/frontend.cjs"},
+  "devDependencies": {"@playwright/test": "1.56.1"}
+}

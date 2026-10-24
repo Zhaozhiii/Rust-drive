@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>云盘</title><link rel="icon" href="data:,"><style>
+body{font:16px/1.6 system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem}button,input{font:inherit}button,a{touch-action:manipulation}button{margin:.2rem;padding:.2rem .6rem;cursor:pointer}nav{overflow-wrap:anywhere;margin:1rem 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.5rem;border-bottom:1px solid GrayText}td:first-child{overflow-wrap:anywhere;word-break:break-word}td:last-child{white-space:nowrap}th:nth-child(2),td:nth-child(2){white-space:nowrap}#error{color:light-dark(#a00,#ffaaaa);white-space:pre-wrap}#drop{border:1px dashed GrayText;padding:1rem;margin:1rem 0}#drop.drag{border:2px solid Highlight}#progress{overflow-wrap:anywhere}small{color:GrayText} @media(max-width:600px){body{margin:1rem auto}table{font-size:.875rem}.modified{display:none}button{padding:.15rem .3rem}td{padding:.5rem .2rem}}
+</style><script src="/app.js" defer></script></head><body>
+<h1>云盘</h1><p id="capacity">正在读取容量…</p><p><small>总容量 10 GiB，单文件最多 5 GiB。公开云盘，所有访客均可管理文件。</small></p>
+<p id="error" role="alert"></p>
+<div><button id="refresh">刷新</button><button id="new-folder">新建文件夹</button><button id="choose">上传文件</button><input type="file" id="file" hidden></div>
+<form id="mkdir" hidden><label>文件夹名称 <input id="folder-name" required maxlength="255"></label><button type="submit">创建</button><button type="button" id="mkdir-cancel">取消</button></form>
+<div id="drop">拖拽文件到这里，或点击“上传文件”。每次上传一个文件。</div>
+<section id="upload" hidden aria-live="polite"><p id="progress"></p><button id="resume">选择原文件续传</button><button id="cancel-upload">取消上传</button></section>
+<nav aria-label="文件路径" id="breadcrumbs"></nav><p id="loading" role="status"></p>
+<table><thead><tr><th>名称</th><th>大小</th><th class="modified">修改时间</th><th>操作</th></tr></thead><tbody id="entries"></tbody></table>
+</body></html>

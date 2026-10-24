@@ -1,0 +1,14 @@
+/target/
+/test-data/
+/artifacts/
+__pycache__/
+
+/node_modules/
+/.env
+/.env.*
+!/.env.example
+*.pem
+*.key
+/deployment-state.json
+/backups/
+/data/
