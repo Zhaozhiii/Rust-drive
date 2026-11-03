@@ -1,0 +1,183 @@
+/* Rust-drive adapters. Component geometry and physics remain in vendor/react-bits. */
+:root { --radius:12px; --radius-control:var(--radius); --radius-card:var(--radius); --control-ease:cubic-bezier(.22,.12,.18,1); --view-height:100svh; --page-gutter:24px; --page-top:clamp(6px,calc(var(--view-height) * .025),24px); --header-size:clamp(28px,calc(var(--view-height) * .05),40px); --header-gap:clamp(4px,calc(var(--view-height) * .014),14px); --capacity-size:clamp(13px,calc(var(--view-height) * .034),21px); --drop-gap:clamp(4px,calc(var(--view-height) * .012),12px); --drop-height:max(0px,min(140px,calc(var(--view-height) / 3 - var(--page-top) - var(--header-size) - var(--header-gap) - var(--capacity-size) - var(--drop-gap) - 2px))); --theme-open-width:min(286px,calc(100vw - var(--page-gutter) * 2)) }
+button,input:not([type="file"]),select,#toast { border-radius:var(--radius-control) }
+#mkdir,#upload { border-radius:var(--radius-card) }
+.theme-anchor { position:relative; flex:0 0 var(--header-size); height:var(--header-size); z-index:10 }
+.theme-switch { position:absolute; right:0; top:0; width:var(--header-size); height:var(--header-size); border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:0 2px 6px #00000003; transition:width .68s var(--control-ease),box-shadow .68s,background .25s; overflow:hidden }
+.theme-switch.expanded { width:var(--theme-open-width); box-shadow:var(--shadow) }
+#theme-toggle { position:absolute; left:calc(100% - var(--header-size) + 1px); top:0; width:calc(var(--header-size) - 2px); height:calc(var(--header-size) - 2px); border:0; padding:0; display:grid; place-items:center; border-radius:var(--radius); background:transparent; transition:left .68s var(--control-ease),background .25s }
+.theme-switch.expanded #theme-toggle { left:var(--theme-icon-left,0px) }
+#theme-toggle:hover { transform:none; background:var(--soft) }
+#theme-toggle:active { transform:scale(.92) }
+.theme-options { display:grid; grid-template-columns:1fr 1fr 1.5fr; align-items:center; gap:2px; height:calc(var(--header-size) - 2px); padding:3px; width:calc(var(--theme-open-width) - 2px); opacity:0; filter:blur(6px); transition:opacity .36s var(--control-ease),filter .58s var(--control-ease); pointer-events:none }
+.theme-switch.expanded .theme-options { opacity:1; filter:blur(0); pointer-events:auto; transition-delay:80ms }
+.theme-options button { display:flex; align-items:center; gap:6px; justify-content:center; border:0; background:transparent; height:100%; min-width:0; font-size:11px; padding:0 6px; white-space:nowrap; color:var(--muted); transform:none; transition:color .2s,background .2s }
+.theme-options button span { display:flex; flex:0 0 16px; width:16px }
+.theme-options button[aria-checked="true"] span { visibility:hidden }
+.theme-options button[aria-checked="true"] { background:var(--soft); color:var(--ink) }
+.theme-options button:hover { background:var(--soft); transform:none }
+.button-symbol { display:inline-flex; align-items:center; vertical-align:-3px }
+#refresh.busy .refresh-symbol { animation:spin .65s linear infinite }
+#refresh:hover .refresh-symbol { transform:none }
+.refresh-symbol { transform:rotate(0); transition:none }
+#drop { border-radius:var(--radius-card); min-height:160px; padding:12px 20px 14px; gap:3px; overflow:visible; transition:background .25s,border-color .25s,transform .4s var(--spring),box-shadow .3s }
+#drop:before,#drop:after { display:none }
+#drop.drag { transform:scale(1.006); background:var(--surface) }
+#drop-capacity-fill { position:absolute; inset:0 auto 0 0; width:0; max-width:100%; background:linear-gradient(90deg,color-mix(in srgb,var(--ink) 9%,transparent),color-mix(in srgb,var(--ink) 3%,transparent)); border-radius:15px 0 0 15px; pointer-events:none; transition:width .7s var(--ease); z-index:-1 }
+#drop-capacity-fill:after { content:""; position:absolute; right:0; top:12px; bottom:12px; width:1px; background:color-mix(in srgb,var(--ink) 9%,transparent) }
+#folder-island { height:100%; width:100%; display:flex; justify-content:center; align-items:center; position:relative; z-index:2 }
+#folder-island .folder-float { flex:none; transform:scale(var(--folder-scale,1)); transform-origin:center }
+.folder-float__trigger:hover:not(:disabled),.folder-float__trigger:active:not(:disabled) { background:transparent; transform:none; box-shadow:none }
+.folder-float__front { padding:12px; border-radius:var(--radius); box-shadow:0 -5px 16px #0002 }
+.folder-float__paper,.folder-float__item { border-radius:var(--radius) }
+.folder-float__label { font-size:12px }
+.folder-float__sub { font-size:9px; opacity:.7 }
+.folder-float__item { max-width:190px; overflow:hidden; text-overflow:ellipsis; font-size:10px }
+.folder-float__items:before { pointer-events:none }
+.folder-float__trigger:focus-visible { outline:2px solid var(--ink); outline-offset:5px }
+.file-entry { display:flex; align-items:center; gap:11px; min-width:0 }
+.file-name { min-width:0; overflow-wrap:anywhere }
+.folder-button.file-entry { width:100% }
+.folder-button:hover:not(:disabled) { transform:none }
+.entry-icon { position:relative; display:inline-flex; align-items:center; justify-content:center; flex:0 0 25px; width:25px; height:30px; vertical-align:middle; pointer-events:none }
+.entry-icon > svg { display:block; width:25px; height:30px }
+.entry-icon[data-file-kind="folder"] { color:#b49a63 }
+.folder-icon-closed,.folder-icon-open { position:absolute; inset:2px 0; fill:color-mix(in srgb,currentColor 14%,transparent); transition:opacity .22s,transform .3s var(--spring) }
+.folder-icon-open { opacity:0; transform:translateY(3px) rotateX(-18deg) }
+tr.hovered .folder-icon-closed,tr.opening-folder .folder-icon-closed,.folder-button:focus-visible .folder-icon-closed { opacity:0; transform:translateY(-2px) }
+tr.hovered .folder-icon-open,tr.opening-folder .folder-icon-open,.folder-button:focus-visible .folder-icon-open { opacity:1; transform:translateY(-2px) rotate(-4deg) }
+#upload-file-icon { flex-basis:18px; width:18px; height:22px }
+#upload-file-icon > svg { width:18px; height:22px }
+#upload { --upload-progress:0%; --upload-gradient:linear-gradient(100deg,#4246c7 0%,#8061df 44%,#be90f5 75%,#8861df 100%); position:relative; isolation:isolate; overflow:hidden }
+.progress-track { height:22px; background:var(--soft); border-radius:999px; overflow:hidden; margin:12px 0; position:relative; isolation:isolate }
+.upload-flow { --wave-depth:7px; --wave-length:28px; position:absolute; inset:0 auto 0 0; width:var(--upload-progress); overflow:hidden; background:var(--upload-gradient); transition:width .24s linear; mask-image:linear-gradient(#000,#000),radial-gradient(ellipse var(--wave-depth) calc(var(--wave-length) / 2) at 0 50%,#000 96%,transparent 100%); mask-size:max(0px,calc(100% - var(--wave-depth))) 100%,var(--wave-depth) var(--wave-length); mask-repeat:no-repeat,repeat-y; mask-position:0 0,100% 0; animation:upload-wave 2.6s linear infinite paused }
+.upload-ambience { --wave-depth:10px; --wave-length:56px; z-index:-1; background:linear-gradient(100deg,#4246c710 0%,#8061df12 44%,#be90f516 75%,#8861df10 100%); pointer-events:none }
+.upload-fill:before,.upload-ambience:before { content:""; position:absolute; inset:0; background:linear-gradient(100deg,transparent 10%,#e5cfff66 48%,transparent 75%); transform:translateX(-100%); animation:upload-shimmer 2.6s linear infinite paused }
+.upload-particles { position:absolute; inset:0 }
+.upload-particles i { position:absolute; left:var(--x); top:var(--y); width:var(--size); height:var(--size); border-radius:50%; background:#fff; box-shadow:0 0 4px #ffffffb3; opacity:.65; animation:upload-spark var(--duration) linear var(--delay) infinite paused }
+.upload-ambience:before { opacity:.08 }
+#upload-card-particles { opacity:.35 }
+#upload-card-particles i { width:calc(var(--size) + 1px); height:calc(var(--size) + 1px); background:#a082df; box-shadow:0 0 6px #b59be988 }
+#upload[data-complete="true"] .upload-flow { mask-image:none }
+#upload[data-empty="true"] .upload-flow { visibility:hidden }
+#upload[data-state="uploading"] .upload-flow,#upload[data-state="uploading"] .upload-flow:before,#upload[data-state="uploading"] .upload-particles i { animation-play-state:running }
+@keyframes upload-wave { to { mask-position:0 0,100% var(--wave-length) } }
+@keyframes upload-shimmer { to { transform:translateX(100%) } }
+@keyframes upload-spark { 0% { transform:translate(-14px,2px); opacity:0 } 25% { opacity:.8 } 75% { opacity:.6 } 100% { transform:translate(20px,-2px); opacity:0 } }
+.upload-actions .upload-control { width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; padding:0; border-radius:var(--radius); color:var(--muted); background:transparent }
+.upload-actions .upload-control:hover:not(:disabled) { color:var(--ink); background:var(--soft) }
+.list-footer { flex-direction:column; align-items:flex-start; gap:4px }
+.list-footer .capacity-note { font-size:10px; line-height:1.8; max-width:none; margin:0 }
+.list-heading { flex-direction:row; align-items:center; flex-wrap:wrap }
+.list-heading .toolbar { margin-left:auto }
+.list-heading .toolbar button { height:34px; font-size:12px; padding:5px 11px }
+.mkdir-anchor { position:relative; flex:0 0 118px; width:118px; height:36px; z-index:9 }
+.mkdir-control { position:absolute; right:0; top:0; width:118px; height:36px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); overflow:hidden; transition:width .68s var(--control-ease),box-shadow .68s }
+.mkdir-control.expanded { width:min(380px,calc(100vw - var(--page-gutter) * 2 - 82px)); box-shadow:var(--shadow) }
+.list-heading #new-folder { position:absolute; right:0; top:0; width:116px; height:34px; padding:0; border:0; background:transparent; display:flex; align-items:center; justify-content:center; gap:6px; z-index:1; transition:right .68s var(--control-ease),width .68s var(--control-ease) }
+#new-folder .button-symbol { margin:0; flex:none }
+.new-folder-label { white-space:nowrap; max-width:84px; opacity:1; filter:blur(0); transition:max-width .45s var(--control-ease),opacity .22s,filter .4s }
+.mkdir-control.expanded #new-folder { right:calc(100% - 34px); width:34px; gap:0 }
+.mkdir-control.expanded .new-folder-label { max-width:0; opacity:0; filter:blur(4px); overflow:hidden }
+.list-heading #mkdir { position:absolute; inset:0; height:100%; display:flex; align-items:center; flex-wrap:nowrap; gap:4px; padding:3px 3px 3px 38px; margin:0; border:0; background:transparent; animation:none; opacity:0; filter:blur(6px); transform:translateX(18px); visibility:hidden; transition:opacity .35s var(--control-ease),filter .58s var(--control-ease),transform .68s var(--control-ease),visibility 0s .68s }
+.mkdir-control.expanded #mkdir { opacity:1; filter:blur(0); transform:none; visibility:visible; transition-delay:.1s,0s,0s,0s }
+.list-heading #folder-name { flex:1; width:0; min-width:0; max-width:none; height:28px; border:0; padding:3px 8px; font-size:12px; background:var(--soft) }
+.list-heading #folder-name:focus-visible { outline:0; box-shadow:inset 0 0 0 1px var(--line) }
+.mkdir-control:focus-within { border-color:var(--muted) }
+.list-heading #mkdir button { display:grid; place-items:center; flex:0 0 28px; width:28px; height:28px; border:0; padding:0; background:transparent }
+.list-heading #mkdir button:hover { background:var(--soft); transform:none }
+.list-heading #mkdir button svg { display:block }
+.sort-icon { display:inline-flex; color:var(--muted); opacity:.4; margin-left:6px }
+th[aria-sort="ascending"] .sort-icon,th[aria-sort="descending"] .sort-icon { opacity:1; color:var(--ink) }
+th button { display:inline-flex; align-items:center; font:inherit; color:inherit; letter-spacing:inherit; border:0; background:transparent; padding:0; border-radius:4px }
+th button:hover:not(:disabled) { transform:none; background:transparent; color:var(--ink) }
+.icon-button { width:36px; height:36px; display:inline-flex; justify-content:center; align-items:center; border:1px solid var(--line); border-radius:var(--radius-control); background:var(--surface); padding:0; color:var(--muted); vertical-align:middle; text-decoration:none; transition:transform .25s var(--spring),background .2s,color .2s,box-shadow .2s }
+.icon-button:hover:not(:disabled) { background:var(--soft); color:var(--ink); transform:translateY(-1px); box-shadow:0 3px 8px #00000008 }
+.icon-button:active:not(:disabled) { transform:scale(.94) }
+.download { margin-right:7px }
+.delete-shell { display:inline-block; width:36px; height:36px; position:relative; vertical-align:middle }
+.delete-control { position:absolute; top:0; right:0; height:36px; width:36px; border-radius:var(--radius-control); z-index:2 }
+.delete-shell.expanded { position:static }
+.delete-control.open { inset:0; width:auto; height:auto; z-index:6 }
+.delete-trigger { position:absolute; right:0; top:0; transition:opacity .12s,transform .2s }
+.delete-control.open .delete-trigger { opacity:0; pointer-events:none; visibility:hidden }
+.delete-confirm { position:absolute; inset:8px; display:flex; align-items:center }
+.delete-confirm .slide-commit { display:block; --sc-ink:var(--ink)!important; --sc-on-ink:var(--inverse)!important }
+.delete-confirm .slide-commit__text { color:var(--muted) }
+.delete-confirm .slide-commit__text--error { color:var(--error) }
+.delete-confirm .slide-commit__label { align-items:end; padding:0 88px 0 48px; white-space:normal; text-align:center; font-size:10px; line-height:1.2 }
+.delete-confirm .slide-commit[data-armed] .slide-commit__label { align-items:center; padding-left:40px; font-size:13px; font-weight:700; line-height:1.3 }
+.delete-confirm .slide-commit[data-armed] .slide-commit__text--plain { color:var(--inverse) }
+.delete-control:has([data-armed]) .delete-dismiss { color:var(--inverse) }
+.delete-control:has([data-armed]) .delete-dismiss:hover { background:color-mix(in srgb,var(--inverse) 15%,transparent) }
+.delete-confirm .slide-commit__capsule:focus-visible { box-shadow:inset 0 0 0 2px var(--muted) }
+.delete-dismiss { position:absolute; right:56px; top:50%; translate:0 -50%; display:grid; place-items:center; width:36px; height:36px; border:0; background:transparent; padding:0; color:var(--muted) }
+.delete-dismiss:hover:not(:disabled) { transform:none; background:var(--soft) }
+.delete-control.deleting .delete-dismiss { visibility:hidden }
+.slide-commit__label { font-size:11px }
+.slide-commit__done { font-size:12px }
+.deleting-row { pointer-events:none }
+#flight { position:fixed; inset:0; z-index:30; pointer-events:none; contain:strict }
+#flight .flying-button { min-height:0; width:100%; height:100%; pointer-events:none }
+#flight .flying-button__craft { max-width:200px; transition:opacity .05s linear; pointer-events:none; cursor:default }
+#flight .flying-button__cursor,#flight .flying-button__ramp { display:none }
+#flight .flying-button__label { overflow:hidden; text-overflow:ellipsis }
+#toast { z-index:40 }
+table { border-collapse:separate; border-spacing:0 }
+tbody tr { position:relative; transform-origin:50% 50%; transition:transform .84s cubic-bezier(.22,.12,.18,1),background .3s,box-shadow .72s cubic-bezier(.22,.12,.18,1) }
+tbody tr:is(.hovered,.delete-active) { z-index:3; background:var(--surface); border-radius:12px; box-shadow:var(--row-shadow,0 18px 32px #00000026,0 5px 12px #00000014); transform:perspective(900px) translateY(var(--row-lift,-9px)) scale(var(--row-scale,1.008)) rotateX(var(--row-rx,0deg)) rotateY(var(--row-ry,0deg)); animation:none }
+tbody tr:is(.hovered,.delete-active) td { background:var(--surface); border-bottom-color:transparent; box-shadow:inset 0 1px 0 var(--line),inset 0 -1px 0 var(--line) }
+tbody tr:is(.hovered,.delete-active) td:first-child { border-radius:12px 0 0 12px; box-shadow:inset 1px 0 0 var(--line),inset 0 1px 0 var(--line),inset 0 -1px 0 var(--line) }
+tbody tr:is(.hovered,.delete-active) td:last-child { border-radius:0 12px 12px 0; box-shadow:inset -1px 0 0 var(--line),inset 0 1px 0 var(--line),inset 0 -1px 0 var(--line) }
+tbody tr.delete-active { --row-lift:-15px; --row-scale:1.015; --row-shadow:0 28px 44px #00000038,0 9px 18px #00000022; z-index:5 }
+tbody tr.delete-active td { position:static }
+tbody tr.delete-active .file-entry { pointer-events:none }
+tbody tr.delete-active .download { visibility:hidden; pointer-events:none }
+tbody tr:has(.folder-button:focus-visible) { z-index:3; background:var(--surface); box-shadow:0 12px 24px #00000020; transform:translateY(-6px) }
+tbody tr.opening-folder { background:var(--surface); animation:folder-enter .3s var(--ease) both }
+@keyframes folder-enter { from { transform:perspective(900px) translateY(-9px) scale(1.008); opacity:1 } to { transform:perspective(900px) translateY(-3px) scale(.985); opacity:.5 } }
+@media (max-width:650px) {
+  #drop { min-height:160px; padding:12px 12px 14px }
+  .upload-bottom { flex-wrap:wrap; gap:10px }
+  .upload-metrics { gap:4px 14px }
+  .upload-actions { margin-left:auto }
+  th:nth-child(2) { width:65px } th:last-child { width:108px }
+  .icon-button,.delete-shell { width:40px; height:40px }
+  .delete-control:not(.open) { width:40px; height:40px }
+  .download { margin-right:4px }
+  .list-heading { min-height:28px; margin-bottom:8px }
+  th button { min-height:24px }
+}
+@media (pointer:coarse) {
+  .upload-actions .upload-control { width:40px; height:40px }
+  .icon-button,.delete-shell { width:44px; height:44px }
+  .delete-control:not(.open) { width:44px; height:44px }
+  .download { margin-right:2px }
+  th:last-child { width:112px }
+}
+/* One radius and a viewport budget shared by every rounded application surface. */
+body { margin:var(--page-top) auto 28px; padding:0 var(--page-gutter) }
+.page-header { height:var(--header-size); margin-bottom:var(--header-gap) }
+h1 { font-size:clamp(20px,calc(var(--view-height) * .037),30px); line-height:1 }
+.capacity-row { height:var(--capacity-size); line-height:var(--capacity-size) }
+#capacity { font-size:clamp(10px,calc(var(--view-height) * .017),13px); line-height:var(--capacity-size) }
+#drop { height:var(--drop-height); min-height:0; margin:var(--drop-gap) 0 20px; padding:0; gap:0; border-radius:var(--radius) }
+#drop-capacity-fill { border-radius:var(--radius) 0 0 var(--radius) }
+button,input:not([type="file"]),select,#toast,#upload,.theme-switch,.mkdir-control,.progress-track,.upload-flow,.folder-button,.parent-button { border-radius:var(--radius) }
+th:first-child { border-radius:var(--radius) 0 0 var(--radius) }
+th:last-child { border-radius:0 var(--radius) var(--radius) 0 }
+tbody tr:is(.hovered,.delete-active) { border-radius:var(--radius) }
+tbody tr:is(.hovered,.delete-active) td:first-child { border-radius:var(--radius) 0 0 var(--radius) }
+tbody tr:is(.hovered,.delete-active) td:last-child { border-radius:0 var(--radius) var(--radius) 0 }
+@media (max-width:650px) { :root { --page-gutter:18px } }
+@media (pointer:coarse) {
+  .mkdir-anchor,.mkdir-control { height:40px }
+  .list-heading #new-folder { height:38px }
+  .list-heading #mkdir button { flex-basis:32px; width:32px; height:32px }
+  .list-heading #folder-name { height:32px }
+}
+@media (prefers-reduced-motion:reduce) {
+  *,*:before,*:after { animation:none!important; transition:none!important; scroll-behavior:auto!important }
+  #flight { display:none!important }
+  tbody tr { transform:none!important }
+}

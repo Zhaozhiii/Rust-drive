@@ -1,6 +1,24 @@
 {
-  "name": "rust-drive-tests",
+  "name": "rust-drive-frontend",
   "private": true,
-  "scripts": {"test:frontend": "node tests/frontend.cjs"},
-  "devDependencies": {"@playwright/test": "1.56.1"}
+  "scripts": {
+    "test:frontend": "node tests/frontend.cjs",
+    "test:motion": "node tests/motion.cjs",
+    "test:controls": "node tests/controls.cjs",
+    "test:folder-delete": "node tests/folder-delete.cjs",
+    "build": "node tools/build.mjs",
+    "dev": "node tools/build.mjs --watch"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "esbuild": "0.28.2"
+  },
+  "dependencies": {
+    "lucide-react": "1.61.0",
+    "matter-js": "0.20.0",
+    "motion": "12.23.12",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-file-icon": "1.6.0"
+  }
 }

@@ -49,6 +49,14 @@ with tempfile.TemporaryDirectory(prefix='drive-tests-') as temp:
         assert req('POST','/api/clouddrive/upload-session',dict(path='',name='quota',size=11*1024**2,lastModified=1))[0]==507
         for id in ids:assert req('DELETE',f'/api/clouddrive/upload-session/{id}')[0]==200
         ok('single-file boundary, total quota and concurrent reservations')
+        batch=[dict(name='批量一.bin',size=40*1024**2,lastModified=1),dict(name='批量二.bin',size=40*1024**2,lastModified=2)]
+        code,d,_=req('POST','/api/clouddrive/upload-batch',dict(path='测试目录',files=batch))
+        assert code==200,(code,d);assert d['count']==2 and d['totalSize']==80*1024**2
+        assert req('POST','/api/clouddrive/upload-batch',dict(path='测试目录',files=[batch[0],batch[0]]))[0]==400
+        assert req('POST','/api/clouddrive/upload-batch',dict(path='测试目录',files=batch+[dict(name='批量三.bin',size=11*1024**2,lastModified=3)]))[0]==507
+        assert req('POST','/api/clouddrive/upload-batch',dict(path='../bad',files=batch[:1]))[0]==400
+        assert req('GET','/api/clouddrive/list')[1]['totalSize']==8
+        ok('batch preflight validates names, quota and leaves no reservation')
         data=(bytes(range(256)) * (34*1024**2//256)) + b'end'
         id=create('中文 & ?#%.bin',len(data),'测试目录')
         assert complete(id)[0]==409
@@ -67,6 +75,18 @@ with tempfile.TemporaryDirectory(prefix='drive-tests-') as temp:
         assert req('GET',f'/api/clouddrive/upload-session/{id}')[0]==404
         assert req('GET','/api/clouddrive/download?path='+urllib.parse.quote('测试目录/中文 & ?#%.bin'))[2]['x-accel-redirect'].startswith('/_drive_internal/')
         ok('out-of-order, duplicate/concurrent chunks, missing/short chunks, restart resume, checksum')
+        # Exercise coalescing across HTTP frames and the final partial batch.
+        for size in [256*1024-1, 256*1024, 256*1024+1, 512*1024+37]:
+            payload=(bytes(range(251)) * (size//251+1))[:size]
+            buffered_id=create('buffered.bin',size)
+            frames=(payload[i:i+4093] for i in range(0,size,4093))
+            assert req('PUT',f'/api/clouddrive/upload-session/{buffered_id}/chunk/0',raw=frames)[0]==200
+            p.kill();p.wait(timeout=10);p=start()
+            assert req('GET',f'/api/clouddrive/upload-session/{buffered_id}')[1]['completed']==[0]
+            assert complete(buffered_id)[0]==200
+            assert (root/'buffered.bin').read_bytes()==payload
+            assert req('DELETE','/api/clouddrive/remove?path=buffered.bin')[0]==200
+        ok('fragmented HTTP bodies across write-buffer boundaries survive hard restart')
         id=create('中文 & ?#%.bin',3,'测试目录');assert chunk(id,0,b'new')[0]==200;assert complete(id)[0]==200
         assert target.read_bytes()==b'new'
         assert req('GET','/api/clouddrive/list')[1]['totalSize']==11
@@ -86,6 +106,11 @@ with tempfile.TemporaryDirectory(prefix='drive-tests-') as temp:
         boundary='drive-test';payload=(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="legacy.txt"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()+b'legacy'+f'\r\n--{boundary}--\r\n'.encode())
         code,d,_=req('POST','/api/clouddrive/upload',raw=payload,headers={'Content-Type':f'multipart/form-data; boundary={boundary}'})
         assert code==200,(code,d);assert (root/'legacy.txt').read_bytes()==b'legacy'
+        content=b'fragmented multipart\x00' * 30000
+        payload=(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="buffered-legacy.bin"\r\n\r\n'.encode()+content+f'\r\n--{boundary}--\r\n'.encode())
+        code,d,_=req('POST','/api/clouddrive/upload',raw=(payload[i:i+4093] for i in range(0,len(payload),4093)),headers={'Content-Type':f'multipart/form-data; boundary={boundary}'})
+        assert code==200,(code,d);assert (root/'buffered-legacy.bin').read_bytes()==content
+        assert req('DELETE','/api/clouddrive/remove?path=buffered-legacy.bin')[0]==200
         assert req('DELETE','/api/clouddrive/remove?path='+urllib.parse.quote('测试目录'))[0]==200
         ok('legacy multipart upload, recursive directory deletion')
         assert req('POST','/api/clouddrive/mkdir',{'name':'removed-destination'})[0]==200

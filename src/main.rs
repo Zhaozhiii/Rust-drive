@@ -11,7 +11,7 @@ use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -23,6 +23,8 @@ use tokio::{
 };
 
 const CHUNK: u64 = 16 * 1024 * 1024;
+const WRITE_BUFFER: usize = 256 * 1024;
+const MAX_BATCH: usize = 100;
 const GIB: u64 = 1024 * 1024 * 1024;
 type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
@@ -80,6 +82,7 @@ struct App {
     tree: Arc<Mutex<()>>,
     sessions: Arc<Mutex<HashMap<String, Arc<Session>>>>,
     streams: Arc<Semaphore>,
+    disk: Arc<std::sync::Mutex<u64>>,
     max: u64,
     max_file: u64,
     floor: u64,
@@ -87,6 +90,102 @@ struct App {
 struct Budget {
     used: u64,
     reserved: HashMap<String, u64>,
+}
+// Reserve in-flight writes separately from the logical file quota. The guard
+// lives inside the blocking write task, including if its HTTP request is aborted.
+struct DiskWrite {
+    pending: Arc<std::sync::Mutex<u64>>,
+    bytes: u64,
+}
+impl DiskWrite {
+    fn claim(pending: &mut u64, available: u64, bytes: u64) -> Result<()> {
+        if available.saturating_sub(*pending) < bytes {
+            return Err(Error(
+                StatusCode::INSUFFICIENT_STORAGE,
+                "磁盘空间不足".into(),
+            ));
+        }
+        *pending += bytes;
+        Ok(())
+    }
+    fn acquire(
+        root: &Root,
+        disk: &Arc<std::sync::Mutex<u64>>,
+        floor: u64,
+        bytes: u64,
+    ) -> Result<Self> {
+        let mut pending = disk.lock().unwrap();
+        Self::claim(&mut pending, root.free()?.saturating_sub(floor), bytes)?;
+        Ok(Self {
+            pending: disk.clone(),
+            bytes,
+        })
+    }
+}
+impl Drop for DiskWrite {
+    fn drop(&mut self) {
+        *self.pending.lock().unwrap() -= self.bytes;
+    }
+}
+fn task_error(e: tokio::task::JoinError) -> Error {
+    std::io::Error::other(e).into()
+}
+// Coalesce small HTTP frames without buffering a whole chunk or file.
+struct UploadWriter {
+    file: Arc<std::fs::File>,
+    buffer: Vec<u8>,
+}
+impl UploadWriter {
+    fn new(file: std::fs::File) -> Self {
+        Self {
+            file: Arc::new(file),
+            buffer: Vec::with_capacity(WRITE_BUFFER),
+        }
+    }
+    async fn write(&mut self, a: &App, mut data: &[u8]) -> Result<()> {
+        while !data.is_empty() {
+            let n = data.len().min(WRITE_BUFFER - self.buffer.len());
+            self.buffer.extend_from_slice(&data[..n]);
+            data = &data[n..];
+            if self.buffer.len() == WRITE_BUFFER {
+                self.flush(a).await?;
+            }
+        }
+        Ok(())
+    }
+    async fn flush(&mut self, a: &App) -> Result<()> {
+        if self.buffer.is_empty() {
+            return Ok(());
+        }
+        let file = self.file.clone();
+        let root = a.root.clone();
+        let disk = a.disk.clone();
+        let floor = a.floor;
+        let mut buffer = std::mem::take(&mut self.buffer);
+        self.buffer = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+            use std::io::Write;
+            let _space = DiskWrite::acquire(&root, &disk, floor, buffer.len() as u64)?;
+            (&*file).write_all(&buffer)?;
+            buffer.clear();
+            Ok(buffer)
+        })
+        .await
+        .map_err(task_error)??;
+        Ok(())
+    }
+    async fn sync(&self, data_only: bool) -> Result<()> {
+        let file = self.file.clone();
+        tokio::task::spawn_blocking(move || {
+            if data_only {
+                file.sync_data()
+            } else {
+                file.sync_all()
+            }
+        })
+        .await
+        .map_err(task_error)??;
+        Ok(())
+    }
 }
 #[derive(Serialize, Deserialize, Clone)]
 struct Meta {
@@ -126,8 +225,51 @@ async fn save(s: &Session, m: &Meta) -> Result<()> {
     f.write_all(&serde_json::to_vec(m).unwrap()).await?;
     f.sync_all().await?;
     tokio::fs::rename(tmp, s.folder.join("session.json")).await?;
-    std::fs::File::open(&s.folder)?.sync_all()?;
+    tokio::fs::File::open(&s.folder).await?.sync_all().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+
+    #[test]
+    fn concurrent_writes_cannot_spend_the_same_free_space() {
+        let mut pending = 0;
+        DiskWrite::claim(&mut pending, 1024, 768).unwrap();
+        assert_eq!(
+            DiskWrite::claim(&mut pending, 1024, 257).unwrap_err().0,
+            StatusCode::INSUFFICIENT_STORAGE
+        );
+        assert_eq!(pending, 768);
+        DiskWrite::claim(&mut pending, 1024, 256).unwrap();
+        assert_eq!(pending, 1024);
+        assert!(DiskWrite::claim(&mut pending, 512, 1).is_err());
+    }
+
+    #[tokio::test]
+    async fn cancelled_waiter_keeps_space_reserved_until_disk_task_finishes() {
+        let pending = Arc::new(std::sync::Mutex::new(256));
+        let guard = DiskWrite {
+            pending: pending.clone(),
+            bytes: 256,
+        };
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, done) = tokio::sync::oneshot::channel();
+        let task = tokio::task::spawn_blocking(move || {
+            let _ = started.send(());
+            wait.recv().unwrap();
+            drop(guard);
+            let _ = finished.send(());
+        });
+        ready.await.unwrap();
+        task.abort();
+        assert_eq!(*pending.lock().unwrap(), 256);
+        release.send(()).unwrap();
+        done.await.unwrap();
+        assert_eq!(*pending.lock().unwrap(), 0);
+    }
 }
 async fn session(a: &App, id: &str) -> Result<Arc<Session>> {
     a.sessions.lock().await.get(id).cloned().ok_or_else(missing)
@@ -141,6 +283,16 @@ fn valid_name(n: &str) -> Result<()> {
         || n.contains(['/', '\\', '\0'])
     {
         return Err(bad("无效的文件或目录名称"));
+    }
+    Ok(())
+}
+fn valid_upload(a: &App, name: &str, size: u64, last_modified: u64) -> Result<()> {
+    valid_name(name)?;
+    if size == 0 || size > a.max_file || last_modified > 9007199254740991 {
+        return Err(bad(&format!(
+            "文件信息无效或超过 {} 单文件上限",
+            display(a.max_file)
+        )));
     }
     Ok(())
 }
@@ -160,6 +312,18 @@ struct Create {
     size: u64,
     #[serde(rename = "lastModified")]
     last_modified: u64,
+}
+#[derive(Deserialize)]
+struct BatchFile {
+    name: String,
+    size: u64,
+    #[serde(rename = "lastModified")]
+    last_modified: u64,
+}
+#[derive(Deserialize)]
+struct Batch {
+    path: String,
+    files: Vec<BatchFile>,
 }
 fn display(n: u64) -> String {
     if n < GIB {
@@ -215,29 +379,39 @@ async fn mkdir(
     Ok(Json(json!({"message":"创建成功"})))
 }
 async fn remove(State(a): State<App>, Query(q): Query<Location>) -> Result<Json<Value>> {
+    tokio::spawn(remove_entry(a, q)).await.map_err(task_error)?
+}
+async fn remove_entry(a: App, q: Location) -> Result<Json<Value>> {
     if q.path.is_empty() {
         return Err(bad("不能删除根目录"));
     }
     let _tree = a.tree.lock().await;
-    let (p, n) = a.root.parent(&q.path)?;
-    let f = a.root.open(&q.path, false)?;
-    let md = f.file.metadata()?;
-    let size = if md.is_dir() {
-        scan_size(&f.proc(), false)?
-    } else {
-        md.len()
-    };
-    if md.is_dir() {
-        std::fs::remove_dir_all(p.proc().join(n))?
-    } else {
-        std::fs::remove_file(p.proc().join(n))?
-    }
+    let root = a.root.clone();
+    let size = tokio::task::spawn_blocking(move || -> Result<u64> {
+        let (p, n) = root.parent(&q.path)?;
+        let f = root.open(&q.path, false)?;
+        let md = f.file.metadata()?;
+        let size = if md.is_dir() {
+            scan_size(&f.proc(), false)?
+        } else {
+            md.len()
+        };
+        if md.is_dir() {
+            std::fs::remove_dir_all(p.proc().join(n))?
+        } else {
+            std::fs::remove_file(p.proc().join(n))?
+        }
+        Ok(size)
+    })
+    .await
+    .map_err(task_error)??;
     let mut b = a.used.lock().await;
     b.used = b.used.saturating_sub(size);
     Ok(Json(json!({"message":"删除成功"})))
 }
 async fn download(State(a): State<App>, Query(q): Query<Location>) -> Result<Response> {
-    let _tree = a.tree.lock().await;
+    // openat2 constrains this lookup; atomic replacement needs no tree lock.
+    // Downloads should not queue behind recursive deletion or commit fsync.
     let f = a.root.open(&q.path, false)?;
     if !f.file.metadata()?.is_file() {
         return Err(bad("请选择文件"));
@@ -274,25 +448,24 @@ async fn download(State(a): State<App>, Query(q): Query<Location>) -> Result<Res
     );
     Ok((h, "").into_response())
 }
-async fn reserve(a: &App, id: &str, size: u64) -> Result<()> {
-    let mut b = a.used.lock().await;
+fn check_space(a: &App, b: &Budget, exclude: Option<&str>, requested: u64) -> Result<()> {
     let reserved: u64 = b
         .reserved
         .iter()
-        .filter(|(k, _)| k.as_str() != id)
-        .map(|(_, n)| n)
+        .filter(|(key, _)| exclude != Some(key.as_str()))
+        .map(|(_, size)| size)
         .sum();
-    if b.used.saturating_add(reserved).saturating_add(size) > a.max {
+    if b.used.saturating_add(reserved).saturating_add(requested) > a.max {
         return Err(Error(
             StatusCode::INSUFFICIENT_STORAGE,
-            "超过 10 GiB 总容量限制（含未完成上传）".into(),
+            format!("超过 {} 总容量限制（含未完成上传）", display(a.max)),
         ));
     }
-    let mut future = size.saturating_sub(allocated(
-        &a.root.path.join(".uploads").join(id).join("data.part"),
-    ));
+    let mut future = requested.saturating_sub(exclude.map_or(0, |id| {
+        allocated(&a.root.path.join(".uploads").join(id).join("data.part"))
+    }));
     for (key, n) in &b.reserved {
-        if key != id {
+        if exclude != Some(key.as_str()) {
             future = future.saturating_add(n.saturating_sub(allocated(
                 &a.root.path.join(".uploads").join(key).join("data.part"),
             )));
@@ -304,16 +477,23 @@ async fn reserve(a: &App, id: &str, size: u64) -> Result<()> {
             "磁盘可用空间不足，需保留系统空间".into(),
         ));
     }
+    Ok(())
+}
+async fn reserve(a: &App, id: &str, size: u64) -> Result<()> {
+    let mut b = a.used.lock().await;
+    check_space(a, &b, Some(id), size)?;
     b.reserved.insert(id.to_owned(), size);
     Ok(())
 }
 async fn create(State(a): State<App>, Json(q): Json<Create>) -> Result<(StatusCode, Json<Value>)> {
-    valid_name(&q.name)?;
-    if q.size == 0 || q.size > a.max_file || q.last_modified > 9007199254740991 {
-        return Err(bad("文件信息无效或超过 5 GiB"));
+    valid_upload(&a, &q.name, q.size, q.last_modified)?;
+    {
+        // Only validate the destination before creating the hidden session.
+        // The final commit repeats this lookup, so a directory cannot be
+        // removed underneath us without producing a clear error later.
+        let _tree = a.tree.lock().await;
+        a.root.dir(&q.path)?;
     }
-    let _tree = a.tree.lock().await;
-    a.root.dir(&q.path)?;
     let id = uuid::Uuid::new_v4().to_string();
     reserve(&a, &id, q.size).await?;
     let folder = a.root.path.join(".uploads").join(&id);
@@ -342,6 +522,39 @@ async fn create(State(a): State<App>, Json(q): Json<Create>) -> Result<(StatusCo
     a.sessions.lock().await.insert(id, s);
     Ok((StatusCode::CREATED, Json(status(&meta))))
 }
+async fn batch(State(a): State<App>, Json(q): Json<Batch>) -> Result<Json<Value>> {
+    if q.files.is_empty() {
+        return Err(bad("请选择文件"));
+    }
+    if q.files.len() > MAX_BATCH {
+        return Err(bad(&format!("一次最多选择 {MAX_BATCH} 个文件")));
+    }
+    a.root.dir(&q.path)?;
+    let mut names = HashSet::with_capacity(q.files.len());
+    let mut total = 0u64;
+    for file in &q.files {
+        valid_upload(&a, &file.name, file.size, file.last_modified)?;
+        if !names.insert(file.name.as_str()) {
+            return Err(bad("同一批次中不能包含重名文件"));
+        }
+        total = total.saturating_add(file.size);
+    }
+    let remaining = {
+        let b = a.used.lock().await;
+        check_space(&a, &b, None, total)?;
+        let committed = b
+            .used
+            .saturating_add(b.reserved.values().copied().sum::<u64>())
+            .saturating_add(total);
+        a.max.saturating_sub(committed)
+    };
+    Ok(Json(json!({
+        "count":q.files.len(),
+        "totalSize":total,
+        "maxSize":a.max,
+        "remaining":remaining
+    })))
+}
 async fn get_session(State(a): State<App>, Path(id): Path<String>) -> Result<Json<Value>> {
     let s = session(&a, &id).await?;
     let _op = s.ops.read().await;
@@ -354,6 +567,18 @@ async fn get_session(State(a): State<App>, Path(id): Path<String>) -> Result<Jso
 async fn chunk(
     State(a): State<App>,
     Path((id, index)): Path<(String, usize)>,
+    body: axum::body::Body,
+) -> Result<Json<Value>> {
+    // A disconnected handler must not release its chunk lock while a detached
+    // blocking disk write can still be running. Let this task finish that write.
+    tokio::spawn(write_chunk(a, id, index, body))
+        .await
+        .map_err(task_error)?
+}
+async fn write_chunk(
+    a: App,
+    id: String,
+    index: usize,
     body: axum::body::Body,
 ) -> Result<Json<Value>> {
     let _permit = a.streams.acquire().await.unwrap();
@@ -389,28 +614,21 @@ async fn chunk(
         .await?;
     f.seek(std::io::SeekFrom::Start(index as u64 * CHUNK))
         .await?;
+    let mut writer = UploadWriter::new(f.into_std().await);
     let mut stream = body.into_data_stream();
     while let Some(part) = stream.next().await {
         let part = part.map_err(|_| bad("上传已中断"))?;
         if received + part.len() as u64 > expected {
             return Err(bad("分片大小超过预期"));
         }
-        for buf in part.chunks(256 * 1024) {
-            let _b = a.used.lock().await;
-            if a.root.free()?.saturating_sub(a.floor) < buf.len() as u64 {
-                return Err(Error(
-                    StatusCode::INSUFFICIENT_STORAGE,
-                    "磁盘空间不足".into(),
-                ));
-            }
-            f.write_all(buf).await?;
-        }
+        writer.write(&a, &part).await?;
         received += part.len() as u64;
     }
     if received != expected {
         return Err(bad("分片不完整，请重试"));
     }
-    f.sync_data().await?;
+    writer.flush(&a).await?;
+    writer.sync(true).await?;
     let mut current = s.meta.lock().await;
     let mut next = current.clone();
     next.done[index] = true;
@@ -446,9 +664,9 @@ async fn complete(State(a): State<App>, Path(id): Path<String>) -> Result<Json<V
     let mut marker = tokio::fs::File::create(s.folder.join("committing")).await?;
     marker.write_all(b"1").await?;
     marker.sync_all().await?;
-    std::fs::File::open(&s.folder)?.sync_all()?;
+    tokio::fs::File::open(&s.folder).await?.sync_all().await?;
     tokio::fs::rename(part, &target).await?;
-    d.file.sync_all()?;
+    tokio::fs::File::from_std(d.file).sync_all().await?;
     {
         let mut b = a.used.lock().await;
         b.used = b.used.saturating_sub(old).saturating_add(m.size);
@@ -500,7 +718,12 @@ async fn multipart(
             .ok_or_else(|| bad("缺少文件名"))?
             .to_owned();
         valid_name(&name)?;
-        let mut f = tokio::fs::File::create(folder.join("data.part")).await?;
+        let mut writer = UploadWriter::new(
+            tokio::fs::File::create(folder.join("data.part"))
+                .await?
+                .into_std()
+                .await,
+        );
         let mut size = 0;
         while let Some(data) = field.chunk().await.map_err(|_| bad("上传已中断"))? {
             size += data.len() as u64;
@@ -508,19 +731,11 @@ async fn multipart(
                 return Err(bad("文件超过 5 GiB"));
             }
             reserve(&a, &id, size).await?;
-            for buf in data.chunks(256 * 1024) {
-                let _b = a.used.lock().await;
-                if a.root.free()?.saturating_sub(a.floor) < buf.len() as u64 {
-                    return Err(Error(
-                        StatusCode::INSUFFICIENT_STORAGE,
-                        "磁盘空间不足".into(),
-                    ));
-                }
-                f.write_all(buf).await?;
-            }
+            writer.write(&a, &data).await?;
         }
-        f.sync_all().await?;
-        drop(f);
+        writer.flush(&a).await?;
+        writer.sync(false).await?;
+        drop(writer);
         drop(field);
         if upload
             .next_field()
@@ -544,7 +759,7 @@ async fn multipart(
             Err(e) => return Err(e.into()),
         };
         tokio::fs::rename(folder.join("data.part"), target).await?;
-        d.file.sync_all()?;
+        tokio::fs::File::from_std(d.file).sync_all().await?;
         let mut b = a.used.lock().await;
         b.used = b.used.saturating_sub(old).saturating_add(size);
         Ok(Json(json!({"message":"上传成功","name":name})))
@@ -629,6 +844,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         tree: Arc::new(Mutex::new(())),
         sessions: Arc::new(Mutex::new(sessions)),
         streams: Arc::new(Semaphore::new(6)),
+        disk: Arc::new(std::sync::Mutex::new(0)),
         max,
         max_file,
         floor: env_size("DRIVE_DISK_RESERVE_BYTES", 2 * GIB),
@@ -676,6 +892,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             post(multipart).layer(DefaultBodyLimit::disable()),
         )
         .route("/api/clouddrive/upload-session", post(create))
+        .route("/api/clouddrive/upload-batch", post(batch))
         .route(
             "/api/clouddrive/upload-session/{id}",
             get(get_session).delete(cancel),

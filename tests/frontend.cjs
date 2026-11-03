@@ -1,11 +1,18 @@
 const { chromium } = require('@playwright/test');
 const fs = require('fs'), path = require('path'), assert = require('assert'), crypto = require('crypto');
-const base = process.argv[2] || 'https://drive.zhiii.top';
+const base = process.argv[2] || 'http://localhost:4173';
 const staging = base.includes(':18443');
 const artifacts = path.resolve(__dirname,'../artifacts');
 const fixture = path.join(artifacts,'ui-fixture.bin');
 fs.mkdirSync(artifacts,{recursive:true});fs.writeFileSync(fixture,Buffer.alloc(2*1024*1024+17,71));
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
+async function remove(row) {
+ const folder=await row.locator('[data-file-kind="folder"]').count()>0;
+ await row.getByRole('button',{name:'删除',exact:true}).click();
+ const slider=row.getByRole('slider');
+ await slider.press('End');await slider.press('Enter');
+ if(folder){await row.locator('.slide-commit[data-armed]').waitFor();await slider.press('End');await slider.press('Enter');}
+}
 (async () => {
  const browser = await chromium.launch({channel:'msedge',headless:true,args:staging?['--host-resolver-rules=MAP drive.zhiii.top 127.0.0.1']:[]});
  const records=[];
@@ -38,13 +45,19 @@ const sha = b => crypto.createHash('sha256').update(b).digest('hex');
  await page.getByRole('cell',{name:'拖拽 & ?#%.txt',exact:true}).waitFor();
  const result=await page.evaluate(async()=>{const path=new URLSearchParams(location.search).get('path');const r=await fetch('/api/clouddrive/download?path='+encodeURIComponent(path+'/拖拽 & ?#%.txt'),{headers:{Range:'bytes=0-3'}});return {status:r.status,text:await r.text(),range:r.headers.get('Content-Range')};});
  assert.equal(result.status,206);assert.equal(result.text,'drag');assert.equal(result.range,'bytes 0-3/9');
+ const multiNames=['multi-one.txt','multi-two.txt','multi-three.txt'],multiSizes=[31,4097,65537];
+ const multiFiles=multiNames.map((name,i)=>({name,mimeType:'text/plain',buffer:Buffer.alloc(multiSizes[i],65+i)}));
+ await page.locator('#file').setInputFiles(multiFiles);
+ await page.waitForFunction(names=>document.getElementById('upload').hidden&&names.every(name=>[...document.querySelectorAll('#entries .file-name')].some(node=>node.textContent===name)),multiNames,{timeout:60000});
+ const multiResult=await page.evaluate(async names=>{const path=new URLSearchParams(location.search).get('path');const r=await fetch('/api/clouddrive/list?path='+encodeURIComponent(path));const data=await r.json();return names.map(name=>data.entries.find(entry=>entry.name===name)?.size??null);},multiNames);
+ assert.deepEqual(multiResult,multiSizes);
  await page.screenshot({path:path.join(artifacts,mobile?'frontend-mobile.png':'frontend-desktop.png'),fullPage:true});
- assert.equal(await page.locator('img,svg,canvas,video').count(),0);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'no horizontal overflow');
+ assert.equal(await page.locator('img,video').count(),0);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'no horizontal overflow');
  assert.deepEqual(errors,[]);assert(requests.every(r=>!['image','font','stylesheet'].includes(r.type)));assert(requests.every(r=>new URL(r.url).origin===new URL(base).origin));
- await page.getByRole('row').filter({hasText:'拖拽 & ?#%.txt'}).getByRole('button',{name:'删除',exact:true}).click();await page.getByRole('cell',{name:'拖拽 & ?#%.txt',exact:true}).waitFor({state:'detached'});
+ await remove(page.getByRole('row').filter({hasText:'拖拽 & ?#%.txt'}));await page.getByRole('cell',{name:'拖拽 & ?#%.txt',exact:true}).waitFor({state:'detached'});
  await page.getByRole('button',{name:'返回上级目录',exact:true}).click();await page.getByRole('button',{name:'[目录] '+name,exact:true}).waitFor();
- await page.getByRole('row').filter({has:page.getByRole('button',{name:'[目录] '+name,exact:true})}).getByRole('button',{name:'删除',exact:true}).click();await page.getByRole('button',{name:'[目录] '+name,exact:true}).waitFor({state:'detached'});created=false;
- records.push({device:mobile?'mobile':'desktop',checks:['create/navigate directory','upload retry','cancel upload','reload resume','download checksum','overwrite','drag/drop','special filename','Range 206','delete file/directory','return to parent','no image/font/external requests','no horizontal overflow','no page errors'],retryAttempts:failures,requests:requests.length});
+ await remove(page.getByRole('row').filter({has:page.getByRole('button',{name:'[目录] '+name,exact:true})}));await page.getByRole('button',{name:'[目录] '+name,exact:true}).waitFor({state:'detached'});created=false;
+ records.push({device:mobile?'mobile':'desktop',checks:['create/navigate directory','upload retry','cancel upload','reload resume','download checksum','overwrite','drag/drop','special filename','multi-file queue','Range 206','delete file/directory','return to parent','no image/font/external requests','no horizontal overflow','no page errors'],retryAttempts:failures,requests:requests.length});
  } finally {
  if(created) await page.evaluate(async name=>{const r=await fetch('/api/clouddrive/remove?path='+encodeURIComponent(name),{method:'DELETE'});if(!r.ok)throw new Error('fixture cleanup failed');},name);
  await context.close();

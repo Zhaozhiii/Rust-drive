@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>云盘</title>
+<style>
+:root { color-scheme:light; --bg:#fafaf9; --surface:#fff; --soft:#f1f1ef; --hover:#e9e9e6; --ink:#20201f; --muted:#777773; --line:#ddddd8; --faint:#eeeee9; --inverse:#fff; --error:#a52c2c; --shadow:0 8px 28px #0000000d; --ease:cubic-bezier(.22,1,.36,1); --spring:cubic-bezier(.2,1.55,.45,1) }
+@media (prefers-color-scheme:dark) {
+  :root:not([data-theme="light"]) { color-scheme:dark; --bg:#131313; --surface:#1b1b1a; --soft:#242423; --hover:#30302e; --ink:#eeeee9; --muted:#92928b; --line:#383835; --faint:#292927; --inverse:#171716; --error:#ffb0ac; --shadow:0 8px 28px #0003 }
+}
+:root[data-theme="dark"] { color-scheme:dark; --bg:#131313; --surface:#1b1b1a; --soft:#242423; --hover:#30302e; --ink:#eeeee9; --muted:#92928b; --line:#383835; --faint:#292927; --inverse:#171716; --error:#ffb0ac; --shadow:0 8px 28px #0003 }
+::view-transition-old(root),::view-transition-new(root) { animation:none; mix-blend-mode:normal }
+* { box-sizing:border-box }
+body { font:14px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif; max-width:1008px; margin:54px auto; padding:0 24px; background:var(--bg); color:var(--ink); -webkit-font-smoothing:antialiased }
+body,button,input,select { transition:background-color .25s,color .25s,border-color .25s }
+button,input,select { font:inherit }
+button,a,input,select { -webkit-tap-highlight-color:transparent }
+button,a { touch-action:manipulation }
+button { cursor:pointer; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:var(--ink); padding:7px 13px; transition:transform .25s var(--spring),background .2s,border-color .2s,box-shadow .2s }
+button:hover:not(:disabled) { background:var(--soft); border-color:var(--muted); transform:translateY(-1px) }
+button:active:not(:disabled) { transform:translateY(1px) scale(.97) }
+button:disabled { cursor:default; opacity:.5 }
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible { outline:2px solid var(--ink); outline-offset:4px }
+a { color:inherit; text-underline-offset:4px }
+[hidden] { display:none!important }
+.mono { font-variant-numeric:tabular-nums }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0 }
+.page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:25px; gap:20px }
+h1 { font-size:30px; line-height:1.25; letter-spacing:.05em; margin:0; font-weight:600 }
+.capacity-row { display:flex; justify-content:space-between; align-items:baseline; gap:12px }
+#capacity { margin:0; font-size:13px }
+.capacity-note { font-size:10px; color:var(--muted) }
+#error { color:var(--error); white-space:pre-wrap; overflow-wrap:anywhere; background:var(--surface); border-left:2px solid currentColor; padding:10px 14px; margin:0 0 16px; animation:arrive .3s var(--ease) }
+#error:empty { display:none }
+.toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap }
+.toolbar button { height:39px }
+.button-symbol { display:inline-block; margin-right:7px; font-size:16px; line-height:1; vertical-align:-1px }
+.refresh-symbol { transition:transform .6s var(--ease) }
+#refresh.busy .refresh-symbol { animation:spin .85s linear infinite }
+#refresh:hover .refresh-symbol { transform:rotate(90deg) }
+#mkdir { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:14px; padding:16px; background:var(--soft); border:1px solid var(--line); border-radius:8px; animation:arrive .32s var(--ease) }
+#mkdir label { display:flex; align-items:center; gap:10px; font-size:12px; flex:1 }
+input:not([type="file"]),select { border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:5px; padding:6px 9px; min-width:0 }
+#folder-name { flex:1; max-width:340px; width:160px }
+#drop { position:relative; min-height:128px; border:1px dashed var(--line); border-radius:9px; margin:18px 0 26px; padding:30px 24px; text-align:center; background:var(--surface); display:flex; flex-direction:column; justify-content:center; gap:5px; transition:border-color .25s,background .25s,transform .4s var(--spring),box-shadow .3s; isolation:isolate }
+#drop:before,#drop:after { content:""; position:absolute; pointer-events:none; inset:6px; border:1px solid transparent; border-radius:5px; transition:border-color .25s }
+#drop:after { inset:11px }
+#drop.drag { border-color:var(--ink); border-style:solid; background:var(--soft); box-shadow:var(--shadow); transform:scale(1.006) }
+#drop.drag:before { border-color:var(--line) }
+#drop.drag:after { border-color:var(--faint) }
+.drop-corners { position:absolute; inset:0; pointer-events:none; background:linear-gradient(var(--ink),var(--ink)) 0 0/10px 1px no-repeat,linear-gradient(var(--ink),var(--ink)) 0 0/1px 10px no-repeat,linear-gradient(var(--ink),var(--ink)) 100% 100%/10px 1px no-repeat,linear-gradient(var(--ink),var(--ink)) 100% 100%/1px 10px no-repeat; opacity:0; transition:opacity .25s }
+#drop.drag .drop-corners { opacity:1 }
+#upload { border:1px solid var(--line); border-radius:9px; background:var(--surface); padding:13px 16px; margin:-10px 0 22px; animation:arrive .4s var(--ease) }
+.upload-top { display:flex; align-items:center; gap:10px }
+#upload-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; flex:1 }
+#upload-percent { font-size:15px; font-weight:500; letter-spacing:-.02em; font-variant-numeric:tabular-nums }
+.progress-track { height:5px; background:var(--soft); border-radius:5px; overflow:hidden; margin:14px 0; position:relative }
+.upload-metrics { display:flex; gap:4px 16px; flex-wrap:wrap; font-size:10px; color:var(--muted) }
+.upload-metrics strong { color:var(--ink); font-size:11px; font-weight:400; font-variant-numeric:tabular-nums }
+.upload-bottom { display:flex; justify-content:space-between; gap:12px; align-items:center }
+.upload-actions { display:flex; gap:6px; flex-wrap:wrap }
+.upload-actions button { font-size:11px; padding:5px 9px }
+.upload-queue-head { display:flex; justify-content:space-between; gap:12px; border-top:1px solid var(--faint); margin:12px 0 7px; padding-top:10px; color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums }
+.upload-queue-list { list-style:none; margin:0 0 12px; padding:0; max-height:168px; overflow:auto; border:1px solid var(--faint); border-radius:6px; background:var(--bg) }
+.upload-queue-list li { display:flex; align-items:center; gap:8px; min-height:32px; padding:6px 9px; border-bottom:1px solid var(--faint); font-size:11px }
+.upload-queue-list li:last-child { border-bottom:0 }
+.upload-queue-list li[data-status="active"] { background:var(--soft) }
+.upload-queue-list li[data-status="done"] { color:var(--muted) }
+.upload-queue-list .entry-icon { width:18px; height:18px; flex:0 0 18px }
+.queue-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.queue-size,.queue-state { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap }
+.queue-state { min-width:52px; text-align:right }
+.upload-queue-list li[data-status="active"] .queue-state { color:var(--ink) }
+.upload-queue-list li[data-status="failed"] .queue-state { color:var(--error) }
+.list-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin:0 0 12px; min-height:34px }
+nav { overflow-wrap:anywhere; font-size:12px; display:flex; align-items:center; flex-wrap:wrap; gap:3px }
+nav button { border:0; background:transparent; padding:3px 6px; font-size:12px; color:var(--muted) }
+nav button:last-child { color:var(--ink) }
+nav button:hover:not(:disabled) { background:var(--soft); transform:none }
+.crumb-separator { color:var(--line); padding:0 2px }
+.path-heading { flex:1 1 200px; min-width:0 }
+#loading { font-size:10px; line-height:14px; min-height:14px; color:var(--muted); margin:1px 0 0 6px; opacity:1; transition:opacity .24s var(--ease) }
+#loading:empty { opacity:0 }
+.table-wrap { min-height:155px }
+table { width:100%; border-collapse:collapse; table-layout:fixed }
+th,td { text-align:left; padding:16px 12px; border-bottom:1px solid var(--faint) }
+th { font-size:10px; color:var(--muted); font-weight:500; letter-spacing:.08em; background:var(--soft); padding-top:10px; padding-bottom:10px }
+th:first-child { width:auto; border-radius:5px 0 0 5px; padding-left:16px }
+th:nth-child(2) { width:112px }
+th:nth-child(3) { width:165px }
+th:last-child { width:146px; text-align:right; border-radius:0 5px 5px 0; padding-right:16px }
+td:first-child { overflow-wrap:anywhere; word-break:break-word; padding-left:16px }
+td:nth-child(2),td:nth-child(3) { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums }
+td:last-child { text-align:right; padding-right:16px; white-space:nowrap; position:relative }
+tbody tr { transition:background .2s }
+tbody tr:hover { background:var(--surface) }
+tbody tr.new-row { animation:row-arrive .76s cubic-bezier(.22,.12,.18,1) both; animation-delay:var(--row-delay,0ms) }
+table[aria-busy="true"] tbody { opacity:.55 }
+tbody { transition:opacity .3s var(--ease) }
+.folder-button,.parent-button { border:0; background:transparent; padding:0; text-align:left; border-radius:3px }
+.folder-button:hover:not(:disabled),.parent-button:hover:not(:disabled) { background:transparent; transform:translateX(3px); border-color:transparent }
+.directory-tag { font-size:10px; color:var(--muted); margin-right:7px }
+.parent-row td { padding-top:10px; padding-bottom:10px; text-align:left!important }
+.parent-button { font-size:11px; color:var(--muted) }
+.empty-cell { height:132px; text-align:center!important; color:var(--muted); font-size:12px; padding:24px!important }
+.empty-caption { font-size:11px; margin-top:5px; opacity:.7 }
+.list-footer { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:14px; color:var(--muted); font-size:10px }
+#toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); max-width:calc(100vw - 32px); padding:10px 18px; border:1px solid var(--line); border-radius:7px; background:var(--ink); color:var(--inverse); box-shadow:var(--shadow); font-size:12px; z-index:30; overflow-wrap:anywhere; animation:toast-arrive .35s var(--spring) }
+.toast-check { display:inline-block; margin-right:9px; animation:land .4s var(--spring) }
+@keyframes arrive { from { opacity:0; transform:translateY(-7px) } to { opacity:1; transform:translateY(0) } }
+@keyframes row-arrive { from { opacity:0; filter:blur(5px); transform:translateY(-14px) scale(.99) } to { opacity:1; filter:blur(0); transform:none } }
+@keyframes toast-arrive { from { opacity:0; transform:translate(-50%,10px) } to { opacity:1; transform:translate(-50%,0) } }
+@keyframes spin { to { transform:rotate(360deg) } }
+@keyframes breathe { 50% { opacity:.3 } }
+@keyframes scan { from { transform:translateX(-100%) } to { transform:translateX(100%) } }
+@keyframes upload-arrow { 0%,100% { transform:translateY(0); opacity:1 } 45% { transform:translateY(-12px); opacity:0 } 46% { transform:translateY(12px); opacity:0 } }
+@keyframes land { 0% { transform:scale(.6) } 65% { transform:scale(1.2) } 100% { transform:scale(1) } }
+@keyframes hovercraft { 50% { transform:translateY(-4px) rotate(3deg) } }
+@keyframes thrust { to { transform:scaleY(.65); opacity:.55 } }
+@keyframes trail { to { transform:translateY(17px); opacity:0 } }
+:root[data-motion="off"] *,:root[data-motion="off"] *:before,:root[data-motion="off"] *:after { animation:none!important; transition:none!important; scroll-behavior:auto!important }
+:root[data-motion="off"] #flight { display:none!important }
+@media (max-width:650px) {
+  body { margin:28px auto; padding:0 18px }
+  .page-header { margin-bottom:24px } h1 { font-size:26px }
+  .toolbar { gap:6px } .toolbar button { font-size:12px; padding:6px 11px } .button-symbol { margin-right:5px }
+  #drop { min-height:120px; padding:24px 14px; margin-top:16px }
+  .modified { display:none } th,td { padding:14px 7px }
+  th:first-child,td:first-child { padding-left:10px } th:nth-child(2) { width:66px } th:last-child { width:112px; padding-right:9px }
+  td:last-child { padding-right:9px } td:first-child { font-size:12px } td:nth-child(2) { font-size:10px }
+  .download { margin-right:4px; font-size:10px } .delete-trigger { font-size:10px }
+  .list-heading { align-items:flex-start; flex-direction:column; gap:11px }
+  #upload { padding:12px } #upload-percent { font-size:14px } #upload-name { font-size:12px }
+  .upload-actions button { font-size:10px }
+  .upload-queue-list li { font-size:10px } .queue-size { display:none }
+  #mkdir { padding:12px } #mkdir label { flex-basis:100% }
+  .list-footer { font-size:9px } #toast { bottom:18px; width:max-content } .flight-caption { display:none }
+}
+/* @component-styles */
+</style>
+<script src="/app.js"></script>
+</head>
+<body>
+<header class="page-header">
+  <h1>云盘</h1>
+  <div class="theme-anchor"><div class="theme-switch" id="theme-switch" role="group" aria-label="页面配色">
+    <div class="theme-options" id="theme-options" role="radiogroup" aria-label="选择配色" inert>
+      <button id="theme-light" type="button" role="radio" aria-checked="false"><span id="theme-light-icon"></span>浅色</button>
+      <button id="theme-dark" type="button" role="radio" aria-checked="false"><span id="theme-dark-icon"></span>深色</button>
+      <button id="theme-system" type="button" role="radio" aria-checked="true"><span id="theme-system-icon"></span>跟随系统</button>
+    </div>
+    <button id="theme-toggle" type="button" aria-label="页面配色" aria-expanded="false" aria-controls="theme-options"><span id="theme-icon"></span></button>
+  </div></div>
+</header>
+<main>
+  <div class="capacity-row"><p id="capacity" class="mono">正在读取容量…</p></div>
+  <input type="file" id="file" hidden multiple>
+  <div id="drop">
+    <span id="drop-capacity-fill" aria-hidden="true"></span>
+    <span class="sr-only" role="meter" aria-label="存储空间使用率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="capacity-meter"></span>
+    <div id="folder-island"></div>
+  </div>
+  <p id="error" role="alert"></p>
+  <section id="upload" hidden aria-label="文件上传" data-state="paused">
+    <div class="upload-ambience upload-flow" aria-hidden="true"><div id="upload-card-particles" class="upload-particles"></div></div>
+    <p id="progress" class="sr-only" role="status" aria-live="polite"></p>
+    <div class="upload-top"><span id="upload-file-icon" class="entry-icon" aria-hidden="true"></span><span id="upload-name"></span><span id="upload-percent">0.0%</span></div>
+    <div class="progress-track" id="upload-meter" role="progressbar" aria-label="上传进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="upload-fill upload-flow" aria-hidden="true"><div id="upload-particles" class="upload-particles"></div></div></div>
+    <div class="upload-queue-head" id="upload-queue-head" hidden><span id="upload-queue-count"></span><span id="upload-queue-size"></span></div>
+    <ol class="upload-queue-list" id="upload-queue-list" hidden aria-label="上传队列"></ol>
+    <div class="upload-bottom"><div class="upload-metrics"><span><span class="sr-only">已传输 </span><strong id="upload-bytes">—</strong></span><span><span class="sr-only">传输速度 </span><strong id="upload-speed">—</strong></span><span>已用 <strong id="upload-elapsed">—</strong></span><span>剩余 <strong id="upload-eta">计算中</strong></span></div><div class="upload-actions"><button id="pause-upload" class="upload-control" type="button" aria-label="暂停上传" title="暂停上传"></button><button id="resume" class="upload-control" type="button" aria-label="选择原文件续传" title="选择原文件续传"></button><button id="cancel-upload" class="upload-control" type="button" aria-label="取消上传" title="取消上传"></button></div></div>
+  </section>
+  <div class="list-heading"><div class="path-heading"><nav aria-label="文件路径" id="breadcrumbs"></nav><p id="loading" role="status"></p></div><div class="toolbar">
+    <div class="mkdir-anchor"><div id="mkdir-control" class="mkdir-control">
+      <button id="new-folder" type="button" aria-label="新建文件夹" aria-expanded="false" aria-controls="mkdir"><span class="button-symbol" id="new-folder-symbol" aria-hidden="true"></span><span class="new-folder-label">新建文件夹</span></button>
+      <form id="mkdir" inert aria-hidden="true"><label for="folder-name" class="sr-only">文件夹名称</label><input id="folder-name" required maxlength="255" autocomplete="off" placeholder="文件夹名称"><button type="submit" id="mkdir-submit" aria-label="创建" title="创建"></button><button type="button" id="mkdir-cancel" aria-label="取消" title="取消"></button></form>
+    </div></div>
+    <button id="refresh" type="button"><span class="button-symbol refresh-symbol" id="refresh-symbol" aria-hidden="true"></span>刷新</button>
+  </div></div>
+  <div class="table-wrap"><table aria-label="文件列表"><thead><tr><th scope="col" data-sort="name" aria-sort="none"><button type="button">名称<span class="sort-icon" aria-hidden="true"></span></button></th><th scope="col" data-sort="size" aria-sort="none"><button type="button">大小<span class="sort-icon" aria-hidden="true"></span></button></th><th scope="col" class="modified" data-sort="modified" aria-sort="none"><button type="button">修改时间<span class="sort-icon" aria-hidden="true"></span></button></th><th scope="col">操作</th></tr></thead><tbody id="entries"></tbody></table></div>
+  <footer class="list-footer"><span id="entry-count">正在连接你的空间</span><p class="capacity-note" id="capacity-note">正在读取容量限制…</p></footer>
+</main>
+<div id="flight" hidden aria-hidden="true"></div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

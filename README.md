@@ -1,16 +1,23 @@
 # Rust-drive
 
-**主打极致低占用的自托管网盘。空闲后端 RSS 实测 1.56 MiB，三路分片上传峰值 4.73 MiB。**
+**主打极致低占用的自托管网盘。初始版本后端 RSS 实测空闲 1.56 MiB、三路分片上传峰值 4.73 MiB。**
 
-Rust + Axum + Tokio 单进程后端，内嵌纯文字界面，Nginx 交付下载。不依赖 Node.js、数据库、Redis、图片、图标、外部字体或第三方前端脚本。把资源留给文件。
+Rust + Axum + Tokio 单进程后端，内嵌页面，Nginx 交付下载。服务端不依赖 Node.js、数据库或 Redis。第二轮前端使用本地打包的 React Bits 动效与 Lucide SVG 图标，不下载外部图片、字体或 CDN 脚本；第二轮已上线，见 [发布记录](docs/releases/2026-10-27-round2.md)。
+
+上传区的细条波浪进度、同步渐变粒子背景及界面精简已于 2026-10-28 上线，见 [上传区发布记录](docs/releases/2026-10-28-upload-wave.md)。
+
+同日上线文件卡片悬浮与类型图标，取消背景后退，并适配文件夹展开及导航，见 [卡片与图标发布记录](docs/releases/2026-10-28-hover-icons.md)。
+
+多文件上传已于 2026-11-03 上线：一次选择多个文件后按队列逐个传输，保留断点续传，并增加总进度和逐文件状态；发布记录见 [多文件上传发布记录](docs/releases/2026-11-03-multi-upload.md)。
 
 ## 为什么轻
 
-- 约 **1.41 MiB** 的 Linux musl 静态可执行文件；两个异步工作线程。
+- 两个异步工作线程。初始版本 Linux musl 静态文件约 **1.41 MiB**；第二轮本地构建约 **1.96 MiB**，包含本地打包的前端组件。
 - 上传有界流式写盘，每次写入不超过 256 KiB；16 MiB 分片直接写入同一个临时文件，无需再拼接一份大文件。
 - 启动扫描一次容量，上传、覆盖、删除后增量更新，每小时校准；列目录不递归扫描整个网盘。
 - 下载使用 Nginx `X-Accel-Redirect`，支持 Range、断点下载与中文文件名。
-- 前端只有 HTML、少量 CSS 和原生 JavaScript，无构建步骤。
+- Rust 继续嵌入 HTML/CSS 和一个 JS 文件；前端源码用 esbuild 构建，正式运行无需 Node.js。已提交生成产物，直接 Cargo 构建仍可用。
+- 三态主题、原 FlyingButton 拖放入舱、FolderFloat 容量区、细条粒子上传进度、SlideCommit 删除、图标操作及表头排序。交互体验与构建方式见 [动效本地预览](docs/motion-preview.md)。
 
 ## 实测资源占用
 
@@ -30,7 +37,7 @@ Rust + Axum + Tokio 单进程后端，内嵌纯文字界面，Nginx 交付下载
 
 - 目录浏览、面包屑、返回上级、新建目录、目录优先排序、大小和修改时间。
 - 文件下载、递归删除、同名原子覆盖、中文及特殊字符文件名。
-- 选择或拖拽上传、三路并发、每片最多三次尝试；百分比、速度、耗时和预计剩余时间。
+- 选择或拖拽多个文件上传，按队列逐个传输；单文件仍使用三路分片并发、每片最多三次尝试，并提供总进度、逐文件状态、速度、耗时和预计剩余时间。
 - 刷新后重选原文件续传、服务重启后续传、取消上传；上传会话与分片状态落盘。
 - 乱序和重复分片处理、同片并发互斥、完成与取消协调。
 - 默认总容量 10 GiB、单文件 5 GiB、系统保留空间 2 GiB；计入未完成上传预留量，同时检查物理磁盘余量。
@@ -89,6 +96,7 @@ python3 tests/integration.py target/release/drive-service
 | DELETE | `/api/clouddrive/remove` | `?path=` |
 | GET | `/api/clouddrive/download` | `?path=`；由 Nginx 交付 |
 | POST | `/api/clouddrive/upload` | `?path=`，multipart `file` |
+| POST | `/api/clouddrive/upload-batch` | JSON `{path,files:[{name,size,lastModified}]}`；最多 100 个文件，仅预检不占用容量 |
 | POST | `/api/clouddrive/upload-session` | JSON `{path,name,size,lastModified}` |
 | GET / DELETE | `/api/clouddrive/upload-session/:id` | 查询 / 取消 |
 | PUT | `/api/clouddrive/upload-session/:id/chunk/:index` | 二进制分片 |

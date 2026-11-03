@@ -1,5 +1,5 @@
 """Public HTTPS and compatibility checks, scoped to one unique test directory."""
-import hashlib,json,time,urllib.request,urllib.error,urllib.parse,pathlib
+import hashlib,json,time,urllib.request,urllib.error,urllib.parse,pathlib,sys
 BASE='https://drive.zhiii.top';OLD='https://www.zhiii.top';name='_drive_acceptance_'+str(time.time_ns())
 checks=[]
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -16,9 +16,10 @@ assert req('GET','http://drive.zhiii.top/')[0]==308
 for url in [OLD+'/clouddrive',OLD+'/clouddrive/']:
     code,_,h=req('GET',url);assert code==308;assert h['Location']=='https://drive.zhiii.top/'
 checks.append('HTTPS, HTTP redirect and old page redirects')
-for domain in ['https://www.zhiii.top','https://zhiii.top','https://blog.zhiii.top','https://api.zhiii.top']:
-    code,body,_=req('GET',domain+'/');assert code==503;assert '服务已暂停' in body.decode()
-checks.append('all other business domains paused')
+if '--drive-only' not in sys.argv:
+    for domain in ['https://www.zhiii.top','https://zhiii.top','https://blog.zhiii.top','https://api.zhiii.top']:
+        code,body,_=req('GET',domain+'/');assert code==503;assert '服务已暂停' in body.decode()
+    checks.append('all other business domains paused')
 assert req('GET',BASE+'/_drive_internal/camera.zip')[0]==404
 checks.append('internal download location inaccessible externally')
 assert req('POST',OLD+'/api/clouddrive/mkdir',{'name':name})[0]==200
@@ -34,4 +35,4 @@ try:
     checks.append('old API method/body compatibility, special filename, download and Range')
 finally:
     assert req('DELETE',BASE+'/api/clouddrive/remove?path='+urllib.parse.quote(name))[0]==200
-result={'passed':checks};pathlib.Path(__file__).resolve().parents[1].joinpath('artifacts/public-results.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps(result,ensure_ascii=False,indent=2))
+result={'scope':'drive-only' if '--drive-only' in sys.argv else 'initial-migration','passed':checks};pathlib.Path(__file__).resolve().parents[1].joinpath('artifacts/public-results.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps(result,ensure_ascii=False,indent=2))

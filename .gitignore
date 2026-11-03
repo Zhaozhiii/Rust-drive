@@ -12,3 +12,6 @@ __pycache__/
 /deployment-state.json
 /backups/
 /data/
+
+/AGENTS.md
+/.codex-remote-attachments/
